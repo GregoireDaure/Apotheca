@@ -37,7 +37,7 @@ COPY --from=build-shared /app/packages/shared/dist /app/packages/shared/dist
 WORKDIR /app/apps/api
 RUN pnpm run build
 # Create a self-contained production deployment (resolves pnpm symlinks)
-RUN pnpm --filter api deploy --legacy --prod /app/deployed
+RUN pnpm --filter api deploy --legacy --prod --ignore-scripts /app/deployed
 
 # ── Target: Frontend (nginx serving static files) ─────────────────
 FROM nginx:1.27-alpine AS frontend
