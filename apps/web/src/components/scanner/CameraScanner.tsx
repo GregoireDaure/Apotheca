@@ -37,7 +37,6 @@ export function CameraScanner({
   const [hasTorch, setHasTorch] = useState(false);
   const lastScanRef = useRef<string>("");
   const lastScanTimeRef = useRef<number>(0);
-  const [usingNative, setUsingNative] = useState(false);
 
   const handleScanSuccess = useCallback(
     (decodedText: string) => {
@@ -117,7 +116,6 @@ export function CameraScanner({
       }
 
       await video.play();
-      setUsingNative(true);
 
       // Check torch
       const track = stream.getVideoTracks()[0];
@@ -245,7 +243,6 @@ export function CameraScanner({
       }
       setHasTorch(false);
       setTorchOn(false);
-      setUsingNative(false);
     };
   }, [active, handleScanSuccess]);
 
