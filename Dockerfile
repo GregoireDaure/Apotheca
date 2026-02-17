@@ -27,6 +27,8 @@ RUN pnpm build
 FROM base AS build-web
 COPY --from=build-shared /app/packages/shared/dist /app/packages/shared/dist
 WORKDIR /app/apps/web
+ARG VITE_API_URL=/api/v1
+ENV VITE_API_URL=${VITE_API_URL}
 RUN pnpm build
 
 # ── Stage 4: Build backend ────────────────────────────────────────
@@ -34,6 +36,8 @@ FROM base AS build-api
 COPY --from=build-shared /app/packages/shared/dist /app/packages/shared/dist
 WORKDIR /app/apps/api
 RUN pnpm run build
+# Create a self-contained production deployment (resolves pnpm symlinks)
+RUN pnpm --filter api deploy --legacy --prod /app/deployed
 
 # ── Target: Frontend (nginx serving static files) ─────────────────
 FROM nginx:1.27-alpine AS frontend
@@ -49,13 +53,12 @@ CMD ["nginx", "-g", "daemon off;"]
 
 # ── Target: Backend (Node.js running NestJS) ──────────────────────
 FROM node:20-alpine AS backend
-RUN corepack enable && corepack prepare pnpm@10.8.0 --activate
 WORKDIR /app
 
-# Copy built backend + production dependencies
+# Copy built backend + production dependencies from pnpm deploy
+COPY --from=build-api /app/deployed/node_modules ./node_modules
 COPY --from=build-api /app/apps/api/dist ./dist
-COPY --from=build-api /app/apps/api/package.json ./package.json
-COPY --from=build-api /app/node_modules ./node_modules
+COPY --from=build-api /app/deployed/package.json ./package.json
 COPY --from=build-shared /app/packages/shared/dist ./node_modules/@medicine-manager/shared/dist
 COPY --from=build-shared /app/packages/shared/package.json ./node_modules/@medicine-manager/shared/package.json
 
