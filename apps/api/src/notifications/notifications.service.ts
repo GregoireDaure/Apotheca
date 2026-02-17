@@ -87,7 +87,12 @@ export class NotificationsService implements OnModuleInit {
 
   /** Mark all notifications as read */
   async markAllRead(): Promise<void> {
-    await this.notifRepo.update({}, { read: true });
+    await this.notifRepo
+      .createQueryBuilder()
+      .update()
+      .set({ read: true })
+      .where('read = :read', { read: false })
+      .execute();
   }
 
   /** Get unread count */

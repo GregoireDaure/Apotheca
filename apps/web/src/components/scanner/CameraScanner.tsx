@@ -14,14 +14,12 @@ interface CameraScannerProps {
   active: boolean;
 }
 
-// html5-qrcode formats (fallback path)
 const SUPPORTED_FORMATS = [
   Html5QrcodeSupportedFormats.EAN_13,
   Html5QrcodeSupportedFormats.DATA_MATRIX,
   Html5QrcodeSupportedFormats.QR_CODE,
 ];
 
-// Native BarcodeDetector formats
 const NATIVE_FORMATS = ["ean_13", "data_matrix", "qr_code"];
 
 export function CameraScanner({
@@ -29,7 +27,6 @@ export function CameraScanner({
   onClose,
   active,
 }: Readonly<CameraScannerProps>) {
-  const scannerRef = useRef<Html5Qrcode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +37,6 @@ export function CameraScanner({
 
   const handleScanSuccess = useCallback(
     (decodedText: string) => {
-      // Debounce: ignore same code scanned within 3 seconds
       const now = Date.now();
       if (
         decodedText === lastScanRef.current &&
@@ -54,7 +50,6 @@ export function CameraScanner({
         lastScanRef.current = decodedText;
         lastScanTimeRef.current = now;
 
-        // Haptic feedback if available
         if (navigator.vibrate) {
           navigator.vibrate(100);
         }
@@ -70,141 +65,141 @@ export function CameraScanner({
 
     const elementId = "scanner-viewport";
     let cancelled = false;
-    let animFrameId: number | undefined;
-    let html5Qrcode: Html5Qrcode | null = null;
-
-    /**
-     * Native BarcodeDetector path — used on iOS Safari 17.2+ and Chrome 83+.
-     * Bypasses html5-qrcode entirely to avoid its scan-region cropping bugs on iOS.
-     */
-    const startNativeScanner = async (): Promise<boolean> => {
-      if (typeof BarcodeDetector === "undefined") return false;
-
-      const supported = await BarcodeDetector.getSupportedFormats();
-      const formats = NATIVE_FORMATS.filter((f) => supported.includes(f));
-      if (formats.length === 0) return false;
-
-      const detector = new BarcodeDetector({ formats });
-
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: "environment" },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-        },
-        audio: false,
-      });
-      streamRef.current = stream;
-
-      if (cancelled) {
-        stream.getTracks().forEach((t) => t.stop());
-        return true;
-      }
-
-      const video = document.createElement("video");
-      video.srcObject = stream;
-      video.setAttribute("playsinline", "");
-      video.setAttribute("autoplay", "");
-      video.muted = true;
-      video.style.width = "100%";
-      video.style.height = "100%";
-      video.style.objectFit = "cover";
-
-      const container = document.getElementById(elementId);
-      if (container) {
-        container.replaceChildren(video);
-      }
-
-      await video.play();
-
-      // Check torch
-      const track = stream.getVideoTracks()[0];
-      try {
-        const caps = track.getCapabilities?.() as MediaTrackCapabilities & {
-          torch?: boolean;
-        };
-        if (caps?.torch) setHasTorch(true);
-      } catch {
-        // torch check unsupported
-      }
-
-      // Scan loop — self-throttled: waits for detect() + next rAF
-      const scanLoop = async () => {
-        while (!cancelled) {
-          await new Promise<void>((resolve) => {
-            animFrameId = requestAnimationFrame(() => resolve());
-          });
-          if (cancelled) break;
-
-          try {
-            if (video.readyState >= video.HAVE_ENOUGH_DATA) {
-              const barcodes = await detector.detect(video);
-              for (const barcode of barcodes) {
-                if (!cancelled) handleScanSuccess(barcode.rawValue);
-              }
-            }
-          } catch {
-            // Detection error on this frame — continue
-          }
-        }
-      };
-      scanLoop();
-
-      return true;
-    };
-
-    /**
-     * html5-qrcode fallback — used on browsers without native BarcodeDetector.
-     */
-    const startHtml5QrcodeScanner = async () => {
-      html5Qrcode = new Html5Qrcode(elementId, {
-        formatsToSupport: SUPPORTED_FORMATS,
-        verbose: false,
-      });
-      scannerRef.current = html5Qrcode;
-
-      await html5Qrcode.start(
-        { facingMode: "environment" },
-        {
-          fps: 10,
-          qrbox: (viewfinderWidth, viewfinderHeight) => {
-            const size = Math.max(
-              Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.8),
-              100
-            );
-            return { width: size, height: size };
-          },
-        },
-        handleScanSuccess,
-        () => {}
-      );
-
-      // Check if torch is available
-      try {
-        const capabilities =
-          html5Qrcode.getRunningTrackCameraCapabilities();
-        if (capabilities.torchFeature().isSupported()) {
-          setHasTorch(true);
-        }
-      } catch {
-        // torch check failed
-      }
-    };
+    let timerId: ReturnType<typeof setTimeout> | undefined;
 
     const startScanner = async () => {
       try {
-        let usedNative = false;
+        // Always manage the camera ourselves — html5-qrcode's camera
+        // handling is broken on iOS Safari (scan-region crop misalignment).
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: "environment" },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+          },
+          audio: false,
+        });
+        streamRef.current = stream;
+
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+
+        const video = document.createElement("video");
+        video.srcObject = stream;
+        video.setAttribute("playsinline", "");
+        video.setAttribute("autoplay", "");
+        video.muted = true;
+        video.style.width = "100%";
+        video.style.height = "100%";
+        video.style.objectFit = "cover";
+
+        const container = document.getElementById(elementId);
+        if (container) {
+          container.replaceChildren(video);
+        }
+
+        await video.play();
+
+        // Check torch capability
+        const track = stream.getVideoTracks()[0];
         try {
-          usedNative = await startNativeScanner();
+          const caps = track.getCapabilities?.() as MediaTrackCapabilities & {
+            torch?: boolean;
+          };
+          if (caps?.torch) setHasTorch(true);
         } catch {
-          usedNative = false;
+          // not supported
         }
 
-        if (!usedNative && !cancelled) {
-          await startHtml5QrcodeScanner();
+        // Try native BarcodeDetector (Chrome 83+, not iOS Safari)
+        let nativeDetector: BarcodeDetector | null = null;
+        if (typeof BarcodeDetector !== "undefined") {
+          try {
+            const supported = await BarcodeDetector.getSupportedFormats();
+            const formats = NATIVE_FORMATS.filter((f) =>
+              supported.includes(f)
+            );
+            if (formats.length > 0) {
+              nativeDetector = new BarcodeDetector({ formats });
+            }
+          } catch {
+            // BarcodeDetector not usable
+          }
         }
 
-        if (!cancelled) setError(null);
+        // Canvas for frame capture (used by html5-qrcode fallback path)
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+
+        // Create html5-qrcode instance for file-based decoding (fallback)
+        // We use a hidden element so it never touches the visible video.
+        let decoderEl: HTMLDivElement | null = null;
+        let decoder: Html5Qrcode | null = null;
+        if (!nativeDetector) {
+          decoderEl = document.createElement("div");
+          decoderEl.id = "scanner-decoder-hidden";
+          decoderEl.style.display = "none";
+          document.body.appendChild(decoderEl);
+          decoder = new Html5Qrcode("scanner-decoder-hidden", {
+            formatsToSupport: SUPPORTED_FORMATS,
+            verbose: false,
+          });
+        }
+
+        // Scan loop — captures frames and decodes them
+        const scanFrame = async () => {
+          if (cancelled) return;
+
+          if (video.readyState >= video.HAVE_ENOUGH_DATA) {
+            try {
+              if (nativeDetector) {
+                // Native path — detect directly from video element
+                const barcodes = await nativeDetector.detect(video);
+                for (const barcode of barcodes) {
+                  if (!cancelled) handleScanSuccess(barcode.rawValue);
+                }
+              } else if (decoder) {
+                // Fallback: capture frame → canvas → File → html5-qrcode decoder
+                const vw = video.videoWidth;
+                const vh = video.videoHeight;
+                if (vw > 0 && vh > 0) {
+                  canvas.width = vw;
+                  canvas.height = vh;
+                  ctx.drawImage(video, 0, 0, vw, vh);
+
+                  const blob = await new Promise<Blob | null>((resolve) =>
+                    canvas.toBlob(resolve, "image/jpeg", 0.85)
+                  );
+                  if (blob && !cancelled) {
+                    const file = new File([blob], "frame.jpg", {
+                      type: "image/jpeg",
+                    });
+                    try {
+                      const text = await decoder.scanFile(file, false);
+                      if (!cancelled) handleScanSuccess(text);
+                    } catch {
+                      // No barcode detected in this frame — normal
+                    }
+                  }
+                }
+              }
+            } catch {
+              // Detection error on this frame — continue
+            }
+          }
+
+          if (!cancelled) {
+            // ~8 fps — fast enough for scanning, gentle on CPU
+            timerId = setTimeout(scanFrame, 125);
+          }
+        };
+
+        // Wait a moment for iOS Safari video to stabilize, then start scanning
+        timerId = setTimeout(scanFrame, 300);
+
+        setError(null);
       } catch (err) {
         if (cancelled) return;
         const message =
@@ -229,48 +224,27 @@ export function CameraScanner({
 
     return () => {
       cancelled = true;
-      if (animFrameId !== undefined) cancelAnimationFrame(animFrameId);
+      if (timerId !== undefined) clearTimeout(timerId);
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
       }
-      if (html5Qrcode) {
-        html5Qrcode
-          .stop()
-          .then(() => html5Qrcode?.clear())
-          .catch(() => {});
-        scannerRef.current = null;
-      }
+      // Clean up hidden decoder element
+      const decoderEl = document.getElementById("scanner-decoder-hidden");
+      if (decoderEl) decoderEl.remove();
       setHasTorch(false);
       setTorchOn(false);
     };
   }, [active, handleScanSuccess]);
 
   const toggleTorch = async () => {
-    // Native scanner path — use stream directly
-    if (streamRef.current) {
-      const track = streamRef.current.getVideoTracks()[0];
-      try {
-        await track.applyConstraints({
-          advanced: [{ torch: !torchOn } as MediaTrackConstraintSet],
-        });
-        setTorchOn(!torchOn);
-      } catch {
-        // torch toggle failed
-      }
-      return;
-    }
-
-    // html5-qrcode fallback path
-    if (!scannerRef.current) return;
+    if (!streamRef.current) return;
+    const track = streamRef.current.getVideoTracks()[0];
     try {
-      const capabilities = scannerRef.current.getRunningTrackCameraCapabilities();
-      const torch = capabilities.torchFeature();
-      if (torch.isSupported()) {
-        const newState = !torchOn;
-        await torch.apply(newState);
-        setTorchOn(newState);
-      }
+      await track.applyConstraints({
+        advanced: [{ torch: !torchOn } as MediaTrackConstraintSet],
+      });
+      setTorchOn(!torchOn);
     } catch {
       // torch toggle failed
     }
