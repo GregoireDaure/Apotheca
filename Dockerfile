@@ -13,7 +13,8 @@ COPY apps/api/package.json apps/api/package.json
 COPY apps/web/package.json apps/web/package.json
 COPY packages/shared/package.json packages/shared/package.json
 
-RUN pnpm install --frozen-lockfile
+# Use hoisted node_modules so deps are flat and directly copyable
+RUN echo "node-linker=hoisted" > .npmrc && pnpm install --frozen-lockfile
 
 COPY packages/ packages/
 COPY apps/ apps/
@@ -36,8 +37,6 @@ FROM base AS build-api
 COPY --from=build-shared /app/packages/shared/dist /app/packages/shared/dist
 WORKDIR /app/apps/api
 RUN pnpm run build
-# Create a self-contained production deployment (resolves pnpm symlinks)
-RUN pnpm --filter api deploy --legacy --prod --ignore-scripts /app/deployed
 
 # ── Target: Frontend (nginx serving static files) ─────────────────
 FROM nginx:1.27-alpine AS frontend
@@ -55,10 +54,10 @@ CMD ["nginx", "-g", "daemon off;"]
 FROM node:20-alpine AS backend
 WORKDIR /app
 
-# Copy built backend + production dependencies from pnpm deploy
-COPY --from=build-api /app/deployed/node_modules ./node_modules
+# Copy built backend + hoisted production dependencies
 COPY --from=build-api /app/apps/api/dist ./dist
-COPY --from=build-api /app/deployed/package.json ./package.json
+COPY --from=build-api /app/apps/api/package.json ./package.json
+COPY --from=build-api /app/node_modules ./node_modules
 COPY --from=build-shared /app/packages/shared/dist ./node_modules/@medicine-manager/shared/dist
 COPY --from=build-shared /app/packages/shared/package.json ./node_modules/@medicine-manager/shared/package.json
 
