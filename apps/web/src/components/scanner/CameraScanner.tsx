@@ -14,12 +14,15 @@ interface CameraScannerProps {
   active: boolean;
 }
 
-// Only scan for formats we care about — EAN-13 (1D) and DataMatrix (2D)
+// html5-qrcode formats (fallback path)
 const SUPPORTED_FORMATS = [
   Html5QrcodeSupportedFormats.EAN_13,
   Html5QrcodeSupportedFormats.DATA_MATRIX,
-  Html5QrcodeSupportedFormats.QR_CODE, // Some pharmacies use QR with GS1 data
+  Html5QrcodeSupportedFormats.QR_CODE,
 ];
+
+// Native BarcodeDetector formats
+const NATIVE_FORMATS = ["ean_13", "data_matrix", "qr_code"];
 
 export function CameraScanner({
   onScan,
@@ -27,12 +30,14 @@ export function CameraScanner({
   active,
 }: Readonly<CameraScannerProps>) {
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [torchOn, setTorchOn] = useState(false);
   const [hasTorch, setHasTorch] = useState(false);
   const lastScanRef = useRef<string>("");
   const lastScanTimeRef = useRef<number>(0);
+  const [usingNative, setUsingNative] = useState(false);
 
   const handleScanSuccess = useCallback(
     (decodedText: string) => {
@@ -65,53 +70,155 @@ export function CameraScanner({
     if (!active) return;
 
     const elementId = "scanner-viewport";
+    let cancelled = false;
+    let animFrameId: number | undefined;
     let html5Qrcode: Html5Qrcode | null = null;
+
+    /**
+     * Native BarcodeDetector path — used on iOS Safari 17.2+ and Chrome 83+.
+     * Bypasses html5-qrcode entirely to avoid its scan-region cropping bugs on iOS.
+     */
+    const startNativeScanner = async (): Promise<boolean> => {
+      if (typeof BarcodeDetector === "undefined") return false;
+
+      const supported = await BarcodeDetector.getSupportedFormats();
+      const formats = NATIVE_FORMATS.filter((f) => supported.includes(f));
+      if (formats.length === 0) return false;
+
+      const detector = new BarcodeDetector({ formats });
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
+        audio: false,
+      });
+      streamRef.current = stream;
+
+      if (cancelled) {
+        stream.getTracks().forEach((t) => t.stop());
+        return true;
+      }
+
+      const video = document.createElement("video");
+      video.srcObject = stream;
+      video.setAttribute("playsinline", "");
+      video.setAttribute("autoplay", "");
+      video.muted = true;
+      video.style.width = "100%";
+      video.style.height = "100%";
+      video.style.objectFit = "cover";
+
+      const container = document.getElementById(elementId);
+      if (container) {
+        container.replaceChildren(video);
+      }
+
+      await video.play();
+      setUsingNative(true);
+
+      // Check torch
+      const track = stream.getVideoTracks()[0];
+      try {
+        const caps = track.getCapabilities?.() as MediaTrackCapabilities & {
+          torch?: boolean;
+        };
+        if (caps?.torch) setHasTorch(true);
+      } catch {
+        // torch check unsupported
+      }
+
+      // Scan loop — self-throttled: waits for detect() + next rAF
+      const scanLoop = async () => {
+        while (!cancelled) {
+          await new Promise<void>((resolve) => {
+            animFrameId = requestAnimationFrame(() => resolve());
+          });
+          if (cancelled) break;
+
+          try {
+            if (video.readyState >= video.HAVE_ENOUGH_DATA) {
+              const barcodes = await detector.detect(video);
+              for (const barcode of barcodes) {
+                if (!cancelled) handleScanSuccess(barcode.rawValue);
+              }
+            }
+          } catch {
+            // Detection error on this frame — continue
+          }
+        }
+      };
+      scanLoop();
+
+      return true;
+    };
+
+    /**
+     * html5-qrcode fallback — used on browsers without native BarcodeDetector.
+     */
+    const startHtml5QrcodeScanner = async () => {
+      html5Qrcode = new Html5Qrcode(elementId, {
+        formatsToSupport: SUPPORTED_FORMATS,
+        verbose: false,
+      });
+      scannerRef.current = html5Qrcode;
+
+      await html5Qrcode.start(
+        { facingMode: "environment" },
+        {
+          fps: 10,
+          qrbox: (viewfinderWidth, viewfinderHeight) => {
+            const size = Math.max(
+              Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.8),
+              100
+            );
+            return { width: size, height: size };
+          },
+        },
+        handleScanSuccess,
+        () => {}
+      );
+
+      // Check if torch is available
+      try {
+        const capabilities =
+          html5Qrcode.getRunningTrackCameraCapabilities();
+        if (capabilities.torchFeature().isSupported()) {
+          setHasTorch(true);
+        }
+      } catch {
+        // torch check failed
+      }
+    };
 
     const startScanner = async () => {
       try {
-        html5Qrcode = new Html5Qrcode(elementId, {
-          formatsToSupport: SUPPORTED_FORMATS,
-          verbose: false,
-          // Use native BarcodeDetector API when available (iOS Safari 16.4+)
-          // Much more reliable than canvas-based ZXing on mobile
-          experimentalFeatures: {
-            useBarCodeDetectorIfSupported: true,
-          },
-        });
-        scannerRef.current = html5Qrcode;
-
-        await html5Qrcode.start(
-          { facingMode: "environment" }, // rear camera
-          {
-            fps: 10,
-            qrbox: (viewfinderWidth, viewfinderHeight) => {
-              const size = Math.min(viewfinderWidth, viewfinderHeight) * 0.8;
-              return { width: Math.floor(size), height: Math.floor(size) };
-            },
-            aspectRatio: 1, // Square viewfinder works best on mobile
-          },
-          handleScanSuccess,
-          // Silently ignore scan errors (no code detected yet)
-          () => {}
-        );
-
-        // Check if torch is available
+        let usedNative = false;
         try {
-          const capabilities = html5Qrcode.getRunningTrackCameraCapabilities();
-          if (capabilities.torchFeature().isSupported()) {
-            setHasTorch(true);
-          }
+          usedNative = await startNativeScanner();
         } catch {
-          // torch check failed — not supported
+          usedNative = false;
         }
 
-        setError(null);
+        if (!usedNative && !cancelled) {
+          await startHtml5QrcodeScanner();
+        }
+
+        if (!cancelled) setError(null);
       } catch (err) {
+        if (cancelled) return;
         const message =
           err instanceof Error ? err.message : "Camera access failed";
 
-        if (message.includes("NotAllowedError") || message.includes("Permission")) {
-          setError("Camera permission denied. Please allow camera access in your browser settings.");
+        if (
+          message.includes("NotAllowedError") ||
+          message.includes("Permission")
+        ) {
+          setError(
+            "Camera permission denied. Please allow camera access in your browser settings."
+          );
         } else if (message.includes("NotFoundError")) {
           setError("No camera found on this device.");
         } else {
@@ -123,21 +230,41 @@ export function CameraScanner({
     startScanner();
 
     return () => {
+      cancelled = true;
+      if (animFrameId !== undefined) cancelAnimationFrame(animFrameId);
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
       if (html5Qrcode) {
         html5Qrcode
           .stop()
           .then(() => html5Qrcode?.clear())
-          .catch(() => {
-            // Scanner may already be stopped
-          });
+          .catch(() => {});
         scannerRef.current = null;
       }
       setHasTorch(false);
       setTorchOn(false);
+      setUsingNative(false);
     };
   }, [active, handleScanSuccess]);
 
   const toggleTorch = async () => {
+    // Native scanner path — use stream directly
+    if (streamRef.current) {
+      const track = streamRef.current.getVideoTracks()[0];
+      try {
+        await track.applyConstraints({
+          advanced: [{ torch: !torchOn } as MediaTrackConstraintSet],
+        });
+        setTorchOn(!torchOn);
+      } catch {
+        // torch toggle failed
+      }
+      return;
+    }
+
+    // html5-qrcode fallback path
     if (!scannerRef.current) return;
     try {
       const capabilities = scannerRef.current.getRunningTrackCameraCapabilities();
