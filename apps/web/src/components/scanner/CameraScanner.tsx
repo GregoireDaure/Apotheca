@@ -1,31 +1,27 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
+import {
+  BrowserMultiFormatReader,
+  BarcodeFormat,
+} from "@zxing/browser";
+import { DecodeHintType } from "@zxing/library";
 import { parseScanResult, type ScanResult } from "@/lib/gs1-parser";
 import { Button } from "@/components/ui/button";
 import { X, Zap, ZapOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface CameraScannerProps {
-  /** Called when a valid medicine code is detected */
   onScan: (result: ScanResult) => void;
-  /** Called when the user dismisses the scanner */
   onClose: () => void;
-  /** Whether the scanner is currently active */
   active: boolean;
 }
-
-const SUPPORTED_FORMATS = [
-  Html5QrcodeSupportedFormats.EAN_13,
-  Html5QrcodeSupportedFormats.DATA_MATRIX,
-  Html5QrcodeSupportedFormats.QR_CODE,
-];
 
 export function CameraScanner({
   onScan,
   onClose,
   active,
 }: Readonly<CameraScannerProps>) {
-  const scannerRef = useRef<Html5Qrcode | null>(null);
+  const controlsRef = useRef<{ stop: () => void } | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [torchOn, setTorchOn] = useState(false);
@@ -61,42 +57,88 @@ export function CameraScanner({
   useEffect(() => {
     if (!active) return;
 
-    const elementId = "scanner-viewport";
-    let html5Qrcode: Html5Qrcode | null = null;
+    let cancelled = false;
 
     const startScanner = async () => {
       try {
-        html5Qrcode = new Html5Qrcode(elementId, {
-          formatsToSupport: SUPPORTED_FORMATS,
-          verbose: false,
+        // Configure ZXing with the barcode formats we care about
+        const hints = new Map();
+        hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+          BarcodeFormat.EAN_13,
+          BarcodeFormat.DATA_MATRIX,
+          BarcodeFormat.QR_CODE,
+        ]);
+        hints.set(DecodeHintType.TRY_HARDER, true);
+
+        const reader = new BrowserMultiFormatReader(hints, {
+          delayBetweenScanAttempts: 150,
+          delayBetweenScanSuccess: 2000,
         });
-        scannerRef.current = html5Qrcode;
 
-        // NO qrbox — scan the full video frame.
-        // The qrbox scan-region cropping is broken on iOS WebKit
-        // (coordinate mismatch between CSS and video dimensions).
-        // Full-frame scanning avoids this entirely.
-        await html5Qrcode.start(
-          { facingMode: "environment" },
-          { fps: 10, disableFlip: true },
-          handleScanSuccess,
-          () => {}
-        );
+        // Get camera stream ourselves — ensures playsinline + proper iOS handling
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: "environment" },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false,
+        });
 
-        // Check if torch is available
-        try {
-          const capabilities =
-            html5Qrcode.getRunningTrackCameraCapabilities();
-          if (capabilities.torchFeature().isSupported()) {
-            setHasTorch(true);
-          }
-        } catch {
-          // torch check failed
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
         }
+
+        streamRef.current = stream;
+
+        // Create video element with proper iOS attributes
+        const video = document.createElement("video");
+        video.setAttribute("playsinline", "true");
+        video.setAttribute("autoplay", "true");
+        video.muted = true;
+        video.style.width = "100%";
+        video.style.height = "100%";
+        video.style.objectFit = "cover";
+
+        const container = document.getElementById("scanner-viewport");
+        if (container) {
+          container.replaceChildren(video);
+        }
+
+        // Attach stream and play
+        video.srcObject = stream;
+        await video.play();
+
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+
+        // Check torch capability
+        const track = stream.getVideoTracks()[0];
+        try {
+          const caps = track.getCapabilities?.() as MediaTrackCapabilities & {
+            torch?: boolean;
+          };
+          if (caps?.torch) setHasTorch(true);
+        } catch {
+          // not supported
+        }
+
+        // Start ZXing continuous scan on our video element.
+        // Uses drawImage(video, 0, 0) internally — no broken ratio math.
+        const controls = reader.scan(video, (result, _error) => {
+          if (result && !cancelled) {
+            handleScanSuccess(result.getText());
+          }
+          // error is normal (NotFoundException when no code in frame)
+        });
+        controlsRef.current = controls;
 
         setError(null);
       } catch (err) {
-        if (!html5Qrcode) return;
+        if (cancelled) return;
         const message =
           err instanceof Error ? err.message : "Camera access failed";
 
@@ -118,12 +160,12 @@ export function CameraScanner({
     startScanner();
 
     return () => {
-      if (html5Qrcode) {
-        html5Qrcode
-          .stop()
-          .then(() => html5Qrcode?.clear())
-          .catch(() => {});
-        scannerRef.current = null;
+      cancelled = true;
+      controlsRef.current?.stop();
+      controlsRef.current = null;
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
       }
       setHasTorch(false);
       setTorchOn(false);
@@ -131,16 +173,13 @@ export function CameraScanner({
   }, [active, handleScanSuccess]);
 
   const toggleTorch = async () => {
-    if (!scannerRef.current) return;
+    if (!streamRef.current) return;
+    const track = streamRef.current.getVideoTracks()[0];
     try {
-      const capabilities =
-        scannerRef.current.getRunningTrackCameraCapabilities();
-      const torch = capabilities.torchFeature();
-      if (torch.isSupported()) {
-        const newState = !torchOn;
-        await torch.apply(newState);
-        setTorchOn(newState);
-      }
+      await track.applyConstraints({
+        advanced: [{ torch: !torchOn } as MediaTrackConstraintSet],
+      });
+      setTorchOn(!torchOn);
     } catch {
       // torch toggle failed
     }
@@ -150,10 +189,10 @@ export function CameraScanner({
 
   return (
     <div className="fixed inset-0 z-50 bg-black" ref={containerRef}>
-      {/* Scanner viewport — fill screen, hide html5-qrcode's built-in scan region */}
+      {/* Scanner viewport — fill screen */}
       <div
         id="scanner-viewport"
-        className="h-full w-full [&_#qr-shaded-region]:!hidden"
+        className="h-full w-full"
       />
 
       {/* Overlay UI */}
