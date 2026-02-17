@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Warm neutral palette from UX spec */
+    --background: 40 20% 98%;          /* #FAFAF8 — warm off-white */
+    --foreground: 0 0% 10%;            /* #1A1A1A — dark text */
+
+    --card: 0 0% 100%;                 /* #FFFFFF — pure white cards */
+    --card-foreground: 0 0% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 10%;
+
+    --primary: 0 0% 10%;               /* #1A1A1A — dark, confident buttons */
+    --primary-foreground: 40 20% 98%;
+
+    --secondary: 30 10% 95%;           /* Warm light gray */
+    --secondary-foreground: 0 0% 10%;
+
+    --muted: 30 10% 95%;
+    --muted-foreground: 20 6% 43%;     /* #6B6560 — warm medium gray */
+
+    --accent: 30 10% 95%;
+    --accent-foreground: 0 0% 10%;
+
+    --destructive: 0 72% 51%;          /* #DC2626 — muted red for expired */
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 30 12% 90%;              /* #E8E5E0 — warm border */
+    --input: 30 12% 90%;
+    --ring: 0 0% 10%;
+
+    --radius: 0.75rem;                 /* 12px — rounded per UX spec */
+
+    /* Status tokens */
+    --status-clear: 142 71% 45%;       /* #34A853 */
+    --status-clear-bg: 122 39% 93%;    /* #E8F5E9 */
+    --status-warning: 38 92% 50%;      /* #F59E0B */
+    --status-warning-bg: 48 100% 94%;  /* #FFF8E1 */
+    --status-danger: 0 84% 60%;        /* #DC2626 */
+    --status-danger-bg: 0 86% 97%;     /* #FEF2F2 */
+    --status-info: 217 91% 60%;        /* #3B82F6 */
+    --status-info-bg: 214 100% 97%;    /* #EFF6FF */
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}

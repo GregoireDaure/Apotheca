@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Background -->
+  <rect width="64" height="64" rx="14" fill="#1A1A1A"/>
+  <!-- Mortar (bowl) — geometric, rounded -->
+  <path d="M16 32c0-1.5 1.2-2.5 2.5-2.5h27c1.3 0 2.5 1 2.5 2.5 0 9.5-7.2 17-16 17S16 41.5 16 32Z" fill="#FAFAF8"/>
+  <!-- Mortar rim -->
+  <rect x="13" y="27" width="38" height="5" rx="2.5" fill="#FAFAF8"/>
+  <!-- Pestle handle -->
+  <rect x="36" y="10" width="5" height="20" rx="2.5" fill="#FAFAF8" transform="rotate(30 38.5 20)"/>
+  <!-- Pestle head (ball) -->
+  <circle cx="42.5" cy="12" r="4" fill="#FAFAF8"/>
+</svg>

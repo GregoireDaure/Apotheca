@@ -1,0 +1,23 @@
+# ─────────────────────────────────────────────────────────────────────
+# MedicineManager — Docker Ignore
+# ─────────────────────────────────────────────────────────────────────
+node_modules
+**/node_modules
+.git
+.gitignore
+*.md
+!README.md
+_bmad/
+_bmad-output/
+.env
+.env.*
+!.env.example
+!.env.production.example
+coverage
+.nyc_output
+dist
+**/dist
+*.log
+.DS_Store
+.vscode
+.idea
