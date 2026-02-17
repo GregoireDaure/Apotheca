@@ -72,6 +72,11 @@ export function CameraScanner({
         html5Qrcode = new Html5Qrcode(elementId, {
           formatsToSupport: SUPPORTED_FORMATS,
           verbose: false,
+          // Use native BarcodeDetector API when available (iOS Safari 16.4+)
+          // Much more reliable than canvas-based ZXing on mobile
+          experimentalFeatures: {
+            useBarCodeDetectorIfSupported: true,
+          },
         });
         scannerRef.current = html5Qrcode;
 
@@ -80,10 +85,10 @@ export function CameraScanner({
           {
             fps: 10,
             qrbox: (viewfinderWidth, viewfinderHeight) => {
-              const size = Math.min(viewfinderWidth, viewfinderHeight) * 0.7;
+              const size = Math.min(viewfinderWidth, viewfinderHeight) * 0.8;
               return { width: Math.floor(size), height: Math.floor(size) };
             },
-            disableFlip: false,
+            aspectRatio: 1, // Square viewfinder works best on mobile
           },
           handleScanSuccess,
           // Silently ignore scan errors (no code detected yet)
@@ -151,10 +156,10 @@ export function CameraScanner({
 
   return (
     <div className="fixed inset-0 z-50 bg-black" ref={containerRef}>
-      {/* Scanner viewport — stretch video to fill screen, hide html5-qrcode's built-in scan region */}
+      {/* Scanner viewport — fill screen, hide html5-qrcode's built-in scan region */}
       <div
         id="scanner-viewport"
-        className="h-full w-full [&_#qr-shaded-region]:!hidden [&>video]:!object-cover [&>video]:!w-full [&>video]:!h-full"
+        className="h-full w-full [&_#qr-shaded-region]:!hidden"
       />
 
       {/* Overlay UI */}

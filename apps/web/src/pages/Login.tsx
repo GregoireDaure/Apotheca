@@ -157,7 +157,7 @@ export default function Login() {
           /* Login — authenticate with existing passkey */
           <div className="space-y-4">
             <Button
-              className="w-full h-14 text-body font-semibold"
+              className="w-full h-14 text-body text-white font-semibold"
               onClick={handleLogin}
               disabled={loading}
             >

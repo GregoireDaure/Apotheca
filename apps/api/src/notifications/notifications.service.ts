@@ -168,6 +168,28 @@ export class NotificationsService implements OnModuleInit {
     });
   }
 
+  /**
+   * Immediately trigger a restock notification for a single inventory item.
+   * Called from InventoryService when quantity drops to threshold.
+   */
+  async triggerRestockAlert(item: Inventory): Promise<void> {
+    const name = item.medicine?.denomination ?? item.cis;
+
+    const notification = this.notifRepo.create({
+      type: 'restock',
+      title: 'Restock needed',
+      body: `${name} is running low (${item.quantity} left).`,
+      inventoryItemId: item.id,
+    });
+    await this.notifRepo.save(notification);
+
+    await this.sendPushToAll({
+      title: 'Apotheca – Restock needed',
+      body: `${name} is running low (${item.quantity} left).`,
+      data: { url: '/' },
+    });
+  }
+
   /** Send a push notification to all registered subscriptions */
   private async sendPushToAll(payload: {
     title: string;

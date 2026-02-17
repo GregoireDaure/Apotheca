@@ -9,6 +9,7 @@ import { ManualEntryDto } from './dto/manual-entry.dto';
 import { BulkAddDto } from './dto/bulk-add.dto';
 import { BulkRemoveDto } from './dto/bulk-remove.dto';
 import { BdpmService } from '../bdpm/bdpm.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { randomUUID } from 'crypto';
 
 @Injectable()
@@ -19,6 +20,7 @@ export class InventoryService {
     @InjectRepository(Medicine)
     private readonly medicineRepository: Repository<Medicine>,
     private readonly bdpmService: BdpmService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   /**
@@ -115,7 +117,14 @@ export class InventoryService {
       ...updateInventoryDto,
       expiryDate: resolvedExpiry,
     });
-    return await this.inventoryRepository.save(updated);
+    const saved = await this.inventoryRepository.save(updated);
+
+    // Trigger restock notification if quantity dropped to threshold
+    if (saved.restockAlert && saved.quantity <= 1) {
+      await this.notificationsService.triggerRestockAlert(saved);
+    }
+
+    return saved;
   }
 
   async remove(id: string): Promise<void> {
@@ -261,6 +270,9 @@ export class InventoryService {
           results.push({ cis, success: true, removed: true, quantity: 0 });
         } else {
           await this.inventoryRepository.save(item);
+          if (item.restockAlert && item.quantity <= 1) {
+            await this.notificationsService.triggerRestockAlert(item);
+          }
           results.push({ cis, success: true, removed: false, quantity: item.quantity });
         }
       } catch (error) {

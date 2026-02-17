@@ -26,10 +26,11 @@ function PageFallback() {
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 30_000, // 30s — keep data fresh for responsive feel
+      staleTime: 10_000, // 10s — keep data fresh for responsive feel
       retry: 1,
       gcTime: 1000 * 60 * 60 * 24, // 24h — keep cached data for offline use
-      networkMode: 'offlineFirst', // Serve from cache when offline
+      refetchOnWindowFocus: true, // Refresh when user returns to the app
+      refetchOnReconnect: true, // Refresh when network comes back
     },
   },
 });
