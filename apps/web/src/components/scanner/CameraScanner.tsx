@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { X, Zap, ZapOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+const DEBUG = import.meta.env.VITE_DEBUG === "1";
+
 interface CameraScannerProps {
   onScan: (result: ScanResult) => void;
   onClose: () => void;
@@ -31,6 +33,7 @@ export function CameraScanner({
   const [debugLog, setDebugLog] = useState<string[]>([]);
 
   const addDebug = useCallback((msg: string) => {
+    if (!DEBUG) return;
     setDebugLog((prev) => [...prev.slice(-14), `${new Date().toLocaleTimeString()}: ${msg}`]);
   }, []);
 
@@ -237,20 +240,22 @@ export function CameraScanner({
         className="h-full w-full"
       />
 
-      {/* Debug overlay */}
-      <div className="absolute top-12 left-2 right-2 z-50 pointer-events-none">
-        <div className="bg-black/70 rounded-lg p-2 max-h-[40vh] overflow-y-auto">
-          <p className="text-[10px] font-mono text-green-400 mb-1">DEBUG ({debugLog.length} entries)</p>
-          {debugLog.map((line, i) => (
-            <p key={i} className="text-[9px] font-mono text-green-300 leading-tight">
-              {line}
-            </p>
-          ))}
-          {debugLog.length === 0 && (
-            <p className="text-[9px] font-mono text-yellow-300">Waiting for scanner init...</p>
-          )}
+      {/* Debug overlay — only shown when VITE_DEBUG=1 */}
+      {DEBUG && (
+        <div className="absolute top-12 left-2 right-2 z-50 pointer-events-none">
+          <div className="bg-black/70 rounded-lg p-2 max-h-[40vh] overflow-y-auto">
+            <p className="text-[10px] font-mono text-green-400 mb-1">DEBUG ({debugLog.length} entries)</p>
+            {debugLog.map((line, i) => (
+              <p key={i} className="text-[9px] font-mono text-green-300 leading-tight">
+                {line}
+              </p>
+            ))}
+            {debugLog.length === 0 && (
+              <p className="text-[9px] font-mono text-yellow-300">Waiting for scanner init...</p>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Overlay UI */}
       <div className="absolute inset-0 pointer-events-none">
