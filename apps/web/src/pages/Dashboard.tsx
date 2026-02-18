@@ -7,7 +7,7 @@ import { StatCard } from "@/components/dashboard/StatCard";
 import { ActionItem } from "@/components/dashboard/ActionItem";
 import { MedicineRow } from "@/components/dashboard/MedicineRow";
 import { EmptyState } from "@/components/dashboard/EmptyState";
-import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { useState, useMemo, useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { differenceInDays } from "date-fns";
 import { cn } from "@/lib/utils";
 
@@ -129,11 +129,13 @@ export default function Dashboard() {
   const [expiryExpanded, setExpiryExpanded] = useState(false);
   const [restockExpanded, setRestockExpanded] = useState(false);
 
-  // Save scroll position on unmount
+  // Save scroll position continuously so it's captured before navigation
   useEffect(() => {
-    return () => {
+    const onScroll = () => {
       sessionStorage.setItem(SCROLL_KEY, String(window.scrollY));
     };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
   }, []);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
@@ -175,30 +177,26 @@ export default function Dashboard() {
 
   // Restore scroll position once data is loaded and the real content renders
   const restoredRef = useRef(false);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (isLoading || restoredRef.current) return;
     restoredRef.current = true;
+
+    // Disable browser's native scroll restoration
+    if ("scrollRestoration" in history) {
+      history.scrollRestoration = "manual";
+    }
+
     const saved = sessionStorage.getItem(SCROLL_KEY);
     if (!saved) return;
     const y = parseInt(saved, 10);
     if (y <= 0) return;
 
-    // Disable browser's native scroll restoration so it doesn't reset to 0
-    if ("scrollRestoration" in history) {
-      history.scrollRestoration = "manual";
-    }
+    // Immediate attempt (works when DOM is ready synchronously)
+    window.scrollTo(0, y);
 
-    // Retry until the page is tall enough to scroll to the saved position
-    let attempts = 0;
-    const tryRestore = () => {
-      if (document.documentElement.scrollHeight >= y + window.innerHeight || attempts > 10) {
-        window.scrollTo(0, y);
-      } else {
-        attempts++;
-        requestAnimationFrame(tryRestore);
-      }
-    };
-    requestAnimationFrame(tryRestore);
+    // Fallback for mobile Safari where layout may not be committed yet
+    const timer = setTimeout(() => window.scrollTo(0, y), 50);
+    return () => clearTimeout(timer);
   }, [isLoading]);
 
   // Filter inventory by search and sort alphabetically
