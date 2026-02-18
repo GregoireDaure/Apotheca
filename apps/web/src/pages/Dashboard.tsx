@@ -128,7 +128,6 @@ export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [expiryExpanded, setExpiryExpanded] = useState(false);
   const [restockExpanded, setRestockExpanded] = useState(false);
-  const restoredRef = useRef(false);
 
   // Save scroll position on unmount
   useEffect(() => {
@@ -136,18 +135,6 @@ export default function Dashboard() {
       sessionStorage.setItem(SCROLL_KEY, String(window.scrollY));
     };
   }, []);
-
-  // Restore scroll position after content renders
-  useEffect(() => {
-    if (restoredRef.current) return;
-    const saved = sessionStorage.getItem(SCROLL_KEY);
-    if (saved) {
-      const y = parseInt(saved, 10);
-      // Defer to let the DOM render first
-      requestAnimationFrame(() => window.scrollTo(0, y));
-      restoredRef.current = true;
-    }
-  });
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
   const toggleGroup = useCallback((key: string) => {
@@ -185,6 +172,19 @@ export default function Dashboard() {
 
   const isLoading =
     statsQuery.isLoading || actionsQuery.isLoading || inventoryQuery.isLoading;
+
+  // Restore scroll position once data is loaded and the real content renders
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (isLoading || restoredRef.current) return;
+    const saved = sessionStorage.getItem(SCROLL_KEY);
+    if (saved) {
+      const y = parseInt(saved, 10);
+      // Double rAF to ensure the DOM has painted
+      requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo(0, y)));
+    }
+    restoredRef.current = true;
+  }, [isLoading]);
 
   // Filter inventory by search
   const filteredInventory = useMemo(() => {
