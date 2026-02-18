@@ -28,14 +28,21 @@ export function CameraScanner({
   const [hasTorch, setHasTorch] = useState(false);
   const lastScanRef = useRef<string>("");
   const lastScanTimeRef = useRef<number>(0);
+  const [debugLog, setDebugLog] = useState<string[]>([]);
+
+  const addDebug = useCallback((msg: string) => {
+    setDebugLog((prev) => [...prev.slice(-14), `${new Date().toLocaleTimeString()}: ${msg}`]);
+  }, []);
 
   const handleScanSuccess = useCallback(
     (decodedText: string) => {
+      addDebug(`DECODE: "${decodedText.slice(0, 40)}"`);
       const now = Date.now();
       if (
         decodedText === lastScanRef.current &&
         now - lastScanTimeRef.current < 3000
       ) {
+        addDebug("SKIP: debounce (same code <3s)");
         return;
       }
 
@@ -43,25 +50,29 @@ export function CameraScanner({
       if (result) {
         lastScanRef.current = decodedText;
         lastScanTimeRef.current = now;
+        addDebug(`PARSED: cip13=${result.cip13} src=${result.source}`);
 
         if (navigator.vibrate) {
           navigator.vibrate(100);
         }
 
         onScan(result);
+      } else {
+        addDebug("PARSE FAIL: parseScanResult returned null");
       }
     },
-    [onScan]
+    [onScan, addDebug]
   );
 
   useEffect(() => {
     if (!active) return;
 
     let cancelled = false;
+    setDebugLog([]);
 
     const startScanner = async () => {
       try {
-        // Configure ZXing with the barcode formats we care about
+        addDebug("1. Creating ZXing reader...");
         const hints = new Map();
         hints.set(DecodeHintType.POSSIBLE_FORMATS, [
           BarcodeFormat.EAN_13,
@@ -74,8 +85,9 @@ export function CameraScanner({
           delayBetweenScanAttempts: 150,
           delayBetweenScanSuccess: 2000,
         });
+        addDebug("2. Reader created OK");
 
-        // Get camera stream ourselves — ensures playsinline + proper iOS handling
+        addDebug("3. Requesting getUserMedia...");
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: { ideal: "environment" },
@@ -84,15 +96,21 @@ export function CameraScanner({
           },
           audio: false,
         });
+        addDebug(`4. Got stream: ${stream.getVideoTracks().length} track(s)`);
+
+        const track = stream.getVideoTracks()[0];
+        const settings = track.getSettings();
+        addDebug(`5. Track: ${settings.width}x${settings.height} ${settings.facingMode ?? "?"}`);
 
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop());
+          addDebug("CANCELLED after stream");
           return;
         }
 
         streamRef.current = stream;
 
-        // Create video element with proper iOS attributes
+        addDebug("6. Creating <video> element...");
         const video = document.createElement("video");
         video.setAttribute("playsinline", "true");
         video.setAttribute("autoplay", "true");
@@ -104,43 +122,59 @@ export function CameraScanner({
         const container = document.getElementById("scanner-viewport");
         if (container) {
           container.replaceChildren(video);
+          addDebug("7. Video added to DOM");
+        } else {
+          addDebug("7. ERROR: #scanner-viewport not found!");
         }
 
-        // Attach stream and play
         video.srcObject = stream;
+        addDebug("8. Calling video.play()...");
         await video.play();
+        addDebug(`9. Video playing: ${video.videoWidth}x${video.videoHeight}, readyState=${video.readyState}`);
 
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop());
+          addDebug("CANCELLED after play");
           return;
         }
 
-        // Check torch capability
-        const track = stream.getVideoTracks()[0];
+        // Check torch
         try {
           const caps = track.getCapabilities?.() as MediaTrackCapabilities & {
             torch?: boolean;
           };
-          if (caps?.torch) setHasTorch(true);
+          if (caps?.torch) {
+            setHasTorch(true);
+            addDebug("10. Torch: available");
+          } else {
+            addDebug("10. Torch: not available");
+          }
         } catch {
-          // not supported
+          addDebug("10. Torch: check failed");
         }
 
-        // Start ZXing continuous scan on our video element.
-        // Uses drawImage(video, 0, 0) internally — no broken ratio math.
+        addDebug("11. Starting ZXing scan loop...");
+        let scanCallCount = 0;
         const controls = reader.scan(video, (result, _error) => {
+          scanCallCount++;
+          if (scanCallCount <= 3 || scanCallCount % 50 === 0) {
+            addDebug(`scan cb #${scanCallCount}: result=${result ? "YES" : "no"} err=${_error ? _error.constructor.name : "none"}`);
+          }
           if (result && !cancelled) {
             handleScanSuccess(result.getText());
           }
-          // error is normal (NotFoundException when no code in frame)
         });
         controlsRef.current = controls;
+        addDebug("12. Scan loop started OK");
 
         setError(null);
       } catch (err) {
         if (cancelled) return;
         const message =
           err instanceof Error ? err.message : "Camera access failed";
+        const stack = err instanceof Error ? err.stack?.split("\n").slice(0, 3).join(" | ") : "";
+        addDebug(`ERROR: ${message}`);
+        if (stack) addDebug(`STACK: ${stack.slice(0, 120)}`);
 
         if (
           message.includes("NotAllowedError") ||
@@ -170,7 +204,7 @@ export function CameraScanner({
       setHasTorch(false);
       setTorchOn(false);
     };
-  }, [active, handleScanSuccess]);
+  }, [active, handleScanSuccess, addDebug]);
 
   const toggleTorch = async () => {
     if (!streamRef.current) return;
@@ -194,6 +228,21 @@ export function CameraScanner({
         id="scanner-viewport"
         className="h-full w-full"
       />
+
+      {/* Debug overlay */}
+      <div className="absolute top-12 left-2 right-2 z-50 pointer-events-none">
+        <div className="bg-black/70 rounded-lg p-2 max-h-[40vh] overflow-y-auto">
+          <p className="text-[10px] font-mono text-green-400 mb-1">DEBUG ({debugLog.length} entries)</p>
+          {debugLog.map((line, i) => (
+            <p key={i} className="text-[9px] font-mono text-green-300 leading-tight">
+              {line}
+            </p>
+          ))}
+          {debugLog.length === 0 && (
+            <p className="text-[9px] font-mono text-yellow-300">Waiting for scanner init...</p>
+          )}
+        </div>
+      </div>
 
       {/* Overlay UI */}
       <div className="absolute inset-0 pointer-events-none">
