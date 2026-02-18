@@ -1,23 +1,13 @@
 import { Link, Outlet, useLocation } from "react-router-dom";
-import { Home, Camera, Settings, Bell } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
-import { api } from "@/api/client";
+import { Home, Camera, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { OfflineBanner } from "./OfflineBanner";
 
 export function Shell() {
   const location = useLocation();
 
-  const { data: unreadData } = useQuery({
-    queryKey: ["unread-count"],
-    queryFn: () => api.get("/notifications/unread-count").then((r) => r.data),
-    refetchInterval: 60_000, // poll every minute
-  });
-  const unreadCount: number = unreadData?.count ?? 0;
-
   const navItems = [
     { name: "Home", href: "/", icon: Home },
-    { name: "Alerts", href: "/notifications", icon: Bell, badge: unreadCount },
     { name: "Scan", href: "/scan", icon: Camera, isCenter: true },
     { name: "Settings", href: "/settings", icon: Settings },
   ];
@@ -75,11 +65,6 @@ export function Shell() {
               >
                 <span className="relative">
                   <Icon className="h-5 w-5" />
-                  {(item as any).badge > 0 && (
-                    <span className="absolute -right-1.5 -top-1 flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-status-red px-0.5 text-[9px] font-bold leading-none text-white">
-                      {(item as any).badge > 9 ? "9+" : (item as any).badge}
-                    </span>
-                  )}
                 </span>
                 <span>{item.name}</span>
               </Link>

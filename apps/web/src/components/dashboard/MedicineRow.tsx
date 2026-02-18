@@ -8,6 +8,7 @@ interface MedicineRowProps {
   quantity: number;
   isFirst?: boolean;
   isLast?: boolean;
+  indented?: boolean;
 }
 
 export function MedicineRow({
@@ -17,6 +18,7 @@ export function MedicineRow({
   quantity,
   isFirst = false,
   isLast = false,
+  indented = false,
 }: Readonly<MedicineRowProps>) {
   return (
     <li
@@ -29,7 +31,8 @@ export function MedicineRow({
       <Link
         to={`/medicine/${id}`}
         className={cn(
-          "flex w-full items-center justify-between bg-card px-4 py-3 text-left transition-colors hover:bg-accent/30 active:bg-accent/50",
+          "flex w-full items-center justify-between bg-card py-3 text-left transition-colors hover:bg-accent/30 active:bg-accent/50",
+          indented ? "pl-10 pr-4" : "px-4",
           isFirst && "rounded-t-lg",
           isLast && "rounded-b-lg"
         )}

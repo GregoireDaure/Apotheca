@@ -13,7 +13,6 @@ const Scan = lazy(() => import('./pages/Scan'));
 const MedicineDetail = lazy(() => import('./pages/MedicineDetail'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Login = lazy(() => import('./pages/Login'));
-const Notifications = lazy(() => import('./pages/Notifications'));
 const Invite = lazy(() => import('./pages/Invite'));
 
 function PageFallback() {
@@ -58,7 +57,6 @@ function App() {
               <Route path="scan" element={<Suspense fallback={<PageFallback />}><Scan /></Suspense>} />
               <Route path="medicine/:id" element={<Suspense fallback={<PageFallback />}><MedicineDetail /></Suspense>} />
               <Route path="settings" element={<Suspense fallback={<PageFallback />}><Settings /></Suspense>} />
-              <Route path="notifications" element={<Suspense fallback={<PageFallback />}><Notifications /></Suspense>} />
             </Route>
           </Routes>
         </AuthGuard>

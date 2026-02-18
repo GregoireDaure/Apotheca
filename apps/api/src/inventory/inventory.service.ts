@@ -119,9 +119,13 @@ export class InventoryService {
     });
     const saved = await this.inventoryRepository.save(updated);
 
-    // Trigger restock notification if quantity dropped to threshold
-    if (saved.restockAlert && saved.quantity <= 1) {
-      await this.notificationsService.triggerRestockAlert(saved);
+    // Trigger restock notification based on composition group total
+    if (saved.restockAlert) {
+      const all = await this.inventoryRepository.find();
+      const groupTotals = this.groupQuantities(all);
+      if (this.needsRestock(saved, groupTotals)) {
+        await this.notificationsService.triggerRestockAlert(saved);
+      }
     }
 
     return saved;
@@ -132,6 +136,49 @@ export class InventoryService {
     if (result.affected === 0) {
       throw new NotFoundException(`Inventory item with ID ${id} not found`);
     }
+  }
+
+  /**
+   * Build a composition key for grouping medicines with the same active substances.
+   */
+  private compositionKey(item: Inventory): string {
+    const comp = item.medicine?.composition;
+    if (!comp || comp.length === 0) return `_solo_${item.id}`;
+    return comp
+      .map((c) => `${c.substance.trim().toUpperCase()}|${c.dosage.trim().toUpperCase()}`)
+      .sort()
+      .join('+');
+  }
+
+  /**
+   * Compute group-level total quantity for items sharing the same composition.
+   * Returns a Map from item ID to the group total quantity.
+   */
+  private groupQuantities(items: Inventory[]): Map<string, number> {
+    const groups = new Map<string, Inventory[]>();
+    for (const item of items) {
+      const key = this.compositionKey(item);
+      const group = groups.get(key);
+      if (group) group.push(item);
+      else groups.set(key, [item]);
+    }
+    const result = new Map<string, number>();
+    for (const groupItems of groups.values()) {
+      const total = groupItems.reduce((sum, i) => sum + i.quantity, 0);
+      for (const item of groupItems) {
+        result.set(item.id, total);
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Check if an item needs restocking based on its composition group total.
+   */
+  private needsRestock(item: Inventory, groupTotals: Map<string, number>): boolean {
+    if (!item.restockAlert) return false;
+    const groupTotal = groupTotals.get(item.id) ?? item.quantity;
+    return groupTotal <= 1;
   }
 
   /**
@@ -146,10 +193,12 @@ export class InventoryService {
     const all = await this.inventoryRepository.find();
     const now = new Date();
     const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const groupTotals = this.groupQuantities(all);
 
     let expiringSoon = 0;
     let expired = 0;
     let restockNeeded = 0;
+    const restockGroups = new Set<string>();
 
     for (const item of all) {
       if (item.expiryDate) {
@@ -159,8 +208,10 @@ export class InventoryService {
           expiringSoon++;
         }
       }
-      if (item.restockAlert && item.quantity <= 1) {
-        restockNeeded++;
+      // Count restock once per composition group, not per item
+      if (this.needsRestock(item, groupTotals)) {
+        const key = this.compositionKey(item);
+        restockGroups.add(key);
       }
     }
 
@@ -168,7 +219,7 @@ export class InventoryService {
       total: all.length,
       expiringSoon,
       expired,
-      restockNeeded,
+      restockNeeded: restockGroups.size,
     };
   }
 
@@ -183,10 +234,12 @@ export class InventoryService {
     const all = await this.inventoryRepository.find();
     const now = new Date();
     const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const groupTotals = this.groupQuantities(all);
 
     const expiring: Inventory[] = [];
     const expired: Inventory[] = [];
     const restock: Inventory[] = [];
+    const restockGroups = new Set<string>();
 
     for (const item of all) {
       if (item.expiryDate) {
@@ -196,8 +249,13 @@ export class InventoryService {
           expiring.push(item);
         }
       }
-      if (item.restockAlert && item.quantity <= 1) {
-        restock.push(item);
+      // Only add one representative item per composition group for restock
+      if (this.needsRestock(item, groupTotals)) {
+        const key = this.compositionKey(item);
+        if (!restockGroups.has(key)) {
+          restockGroups.add(key);
+          restock.push(item);
+        }
       }
     }
 
@@ -270,8 +328,12 @@ export class InventoryService {
           results.push({ cis, success: true, removed: true, quantity: 0 });
         } else {
           await this.inventoryRepository.save(item);
-          if (item.restockAlert && item.quantity <= 1) {
-            await this.notificationsService.triggerRestockAlert(item);
+          if (item.restockAlert) {
+            const all = await this.inventoryRepository.find();
+            const groupTotals = this.groupQuantities(all);
+            if (this.needsRestock(item, groupTotals)) {
+              await this.notificationsService.triggerRestockAlert(item);
+            }
           }
           results.push({ cis, success: true, removed: false, quantity: item.quantity });
         }

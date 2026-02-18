@@ -24,6 +24,7 @@ export function CameraScanner({
 }: Readonly<CameraScannerProps>) {
   const controlsRef = useRef<{ stop: () => void } | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [torchOn, setTorchOn] = useState(false);
@@ -88,6 +89,10 @@ export function CameraScanner({
         const hints = new Map();
         hints.set(DecodeHintType.POSSIBLE_FORMATS, [
           BarcodeFormat.EAN_13,
+          BarcodeFormat.EAN_8,
+          BarcodeFormat.CODE_128,
+          BarcodeFormat.CODE_39,
+          BarcodeFormat.UPC_A,
           BarcodeFormat.DATA_MATRIX,
           BarcodeFormat.QR_CODE,
         ]);
@@ -103,8 +108,8 @@ export function CameraScanner({
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: { ideal: facingMode },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
           },
           audio: false,
         });
@@ -140,6 +145,7 @@ export function CameraScanner({
         }
 
         video.srcObject = stream;
+        videoRef.current = video;
         addDebug("8. Calling video.play()...");
         await video.play();
         addDebug(`9. Video playing: ${video.videoWidth}x${video.videoHeight}, readyState=${video.readyState}`);
@@ -209,6 +215,7 @@ export function CameraScanner({
       cancelled = true;
       controlsRef.current?.stop();
       controlsRef.current = null;
+      videoRef.current = null;
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
@@ -231,15 +238,58 @@ export function CameraScanner({
     }
   };
 
+  // Tap-to-refocus: briefly switch to manual focus then back to continuous
+  const [focusAnim, setFocusAnim] = useState<{ x: number; y: number } | null>(null);
+  const handleTapToFocus = useCallback(
+    async (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!streamRef.current) return;
+      const track = streamRef.current.getVideoTracks()[0];
+
+      // Show focus animation at tap point
+      const rect = e.currentTarget.getBoundingClientRect();
+      setFocusAnim({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+      setTimeout(() => setFocusAnim(null), 600);
+
+      try {
+        const caps = track.getCapabilities?.() as MediaTrackCapabilities & {
+          focusMode?: string[];
+        };
+        if (!caps?.focusMode?.includes("manual")) return;
+
+        // Kick focus by switching to manual then back to continuous
+        await track.applyConstraints({
+          advanced: [{ focusMode: "manual" } as MediaTrackConstraintSet],
+        });
+        await new Promise((r) => setTimeout(r, 150));
+        await track.applyConstraints({
+          advanced: [{ focusMode: "continuous" } as MediaTrackConstraintSet],
+        });
+        addDebug("Tap-to-focus triggered");
+      } catch {
+        // Focus control not supported — silent fail
+      }
+    },
+    [addDebug],
+  );
+
   if (!active) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-black" ref={containerRef}>
-      {/* Scanner viewport — fill screen */}
+      {/* Scanner viewport — fill screen, tap to refocus */}
       <div
         id="scanner-viewport"
         className="h-full w-full"
+        onPointerDown={handleTapToFocus}
       />
+
+      {/* Focus ring animation on tap */}
+      {focusAnim && (
+        <div
+          className="pointer-events-none absolute z-40 h-16 w-16 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white/80 animate-ping"
+          style={{ left: focusAnim.x, top: focusAnim.y }}
+        />
+      )}
 
       {/* Debug overlay — only shown when VITE_DEBUG=1 */}
       {DEBUG && (
