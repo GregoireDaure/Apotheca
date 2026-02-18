@@ -177,21 +177,39 @@ export default function Dashboard() {
   const restoredRef = useRef(false);
   useEffect(() => {
     if (isLoading || restoredRef.current) return;
-    const saved = sessionStorage.getItem(SCROLL_KEY);
-    if (saved) {
-      const y = parseInt(saved, 10);
-      // Double rAF to ensure the DOM has painted
-      requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo(0, y)));
-    }
     restoredRef.current = true;
+    const saved = sessionStorage.getItem(SCROLL_KEY);
+    if (!saved) return;
+    const y = parseInt(saved, 10);
+    if (y <= 0) return;
+
+    // Disable browser's native scroll restoration so it doesn't reset to 0
+    if ("scrollRestoration" in history) {
+      history.scrollRestoration = "manual";
+    }
+
+    // Retry until the page is tall enough to scroll to the saved position
+    let attempts = 0;
+    const tryRestore = () => {
+      if (document.documentElement.scrollHeight >= y + window.innerHeight || attempts > 10) {
+        window.scrollTo(0, y);
+      } else {
+        attempts++;
+        requestAnimationFrame(tryRestore);
+      }
+    };
+    requestAnimationFrame(tryRestore);
   }, [isLoading]);
 
-  // Filter inventory by search
+  // Filter inventory by search and sort alphabetically
   const filteredInventory = useMemo(() => {
     if (!inventoryQuery.data) return [];
-    if (!searchQuery.trim()) return inventoryQuery.data;
+    const sorted = [...inventoryQuery.data].sort((a, b) =>
+      a.medicine.denomination.localeCompare(b.medicine.denomination),
+    );
+    if (!searchQuery.trim()) return sorted;
     const q = searchQuery.toLowerCase();
-    return inventoryQuery.data.filter((item) =>
+    return sorted.filter((item) =>
       item.medicine.denomination.toLowerCase().includes(q)
     );
   }, [inventoryQuery.data, searchQuery]);
