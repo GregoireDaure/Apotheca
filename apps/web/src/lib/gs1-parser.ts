@@ -53,12 +53,18 @@ const VARIABLE_AIS = new Set(["10", "21", "22", "30", "37"]);
 // GS1 Group Separator character (ASCII 29)
 const GS = "\x1D";
 
-/** Strip FNC1 symbology prefix from raw scanner output */
+/** Strip FNC1 symbology prefix and leading GS characters from raw scanner output */
 function stripFnc1Prefix(data: string): string {
-  if (data.startsWith("]d2") || data.startsWith("]Q3") || data.startsWith("]C1")) {
-    return data.slice(3);
+  let s = data;
+  // Strip known symbology identifiers
+  if (s.startsWith("]d2") || s.startsWith("]Q3") || s.startsWith("]C1")) {
+    s = s.slice(3);
   }
-  return data;
+  // Strip leading GS (FNC1) characters that some scanners emit
+  while (s.length > 0 && (s.charCodeAt(0) === 0x1d || s.charCodeAt(0) === 0xe8)) {
+    s = s.slice(1);
+  }
+  return s;
 }
 
 /** Ensure AI 01 prefix is present; returns null if not a GS1 string */
@@ -196,8 +202,11 @@ export interface ScanResult {
 }
 
 export function parseScanResult(rawCode: string): ScanResult | null {
+  // Trim whitespace and strip any leading non-printable / BOM characters
+  const trimmed = rawCode.replace(/^[\s\uFEFF\x00-\x1F]+/, "").trimEnd();
+
   // First, try GS1 DataMatrix
-  const gs1 = parseGs1DataMatrix(rawCode);
+  const gs1 = parseGs1DataMatrix(trimmed);
   if (gs1.isGs1 && gs1.cip13) {
     return {
       cip13: gs1.cip13,
@@ -208,7 +217,7 @@ export function parseScanResult(rawCode: string): ScanResult | null {
   }
 
   // Then, try plain CIP13 barcode
-  const cleaned = rawCode.trim();
+  const cleaned = trimmed.trim();
   if (isCip13(cleaned)) {
     return {
       cip13: cleaned,

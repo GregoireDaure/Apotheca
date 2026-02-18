@@ -4,7 +4,7 @@ import {
   BarcodeFormat,
 } from "@zxing/browser";
 import { DecodeHintType } from "@zxing/library";
-import { parseScanResult, type ScanResult } from "@/lib/gs1-parser";
+import { parseScanResult, parseGs1DataMatrix, type ScanResult } from "@/lib/gs1-parser";
 import { Button } from "@/components/ui/button";
 import { X, Zap, ZapOff } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -36,7 +36,11 @@ export function CameraScanner({
 
   const handleScanSuccess = useCallback(
     (decodedText: string) => {
-      addDebug(`DECODE: "${decodedText.slice(0, 40)}"`);
+      // Show first 6 char codes to detect hidden chars / FNC1 prefix
+      const codes = [...decodedText].slice(0, 6).map((c) => c.charCodeAt(0));
+      addDebug(`DECODE len=${decodedText.length} codes=[${codes.join(",")}]`);
+      addDebug(`TEXT: "${decodedText.slice(0, 50)}"`);
+
       const now = Date.now();
       if (
         decodedText === lastScanRef.current &&
@@ -46,11 +50,15 @@ export function CameraScanner({
         return;
       }
 
+      // Detailed GS1 parse debug
+      const gs1 = parseGs1DataMatrix(decodedText);
+      addDebug(`GS1: isGs1=${gs1.isGs1} cip13=${gs1.cip13} gtin=${gs1.gtin} exp=${gs1.expiryDate} batch=${gs1.batchNumber}`);
+
       const result = parseScanResult(decodedText);
       if (result) {
         lastScanRef.current = decodedText;
         lastScanTimeRef.current = now;
-        addDebug(`PARSED: cip13=${result.cip13} src=${result.source}`);
+        addDebug(`PARSED OK: cip13=${result.cip13} src=${result.source}`);
 
         if (navigator.vibrate) {
           navigator.vibrate(100);
