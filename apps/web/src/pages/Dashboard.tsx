@@ -7,7 +7,7 @@ import { StatCard } from "@/components/dashboard/StatCard";
 import { ActionItem } from "@/components/dashboard/ActionItem";
 import { MedicineRow } from "@/components/dashboard/MedicineRow";
 import { EmptyState } from "@/components/dashboard/EmptyState";
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { differenceInDays } from "date-fns";
 import { cn } from "@/lib/utils";
 
@@ -122,10 +122,32 @@ function DashboardSkeleton() {
   );
 }
 
+const SCROLL_KEY = "dashboard-scroll";
+
 export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [expiryExpanded, setExpiryExpanded] = useState(false);
   const [restockExpanded, setRestockExpanded] = useState(false);
+  const restoredRef = useRef(false);
+
+  // Save scroll position on unmount
+  useEffect(() => {
+    return () => {
+      sessionStorage.setItem(SCROLL_KEY, String(window.scrollY));
+    };
+  }, []);
+
+  // Restore scroll position after content renders
+  useEffect(() => {
+    if (restoredRef.current) return;
+    const saved = sessionStorage.getItem(SCROLL_KEY);
+    if (saved) {
+      const y = parseInt(saved, 10);
+      // Defer to let the DOM render first
+      requestAnimationFrame(() => window.scrollTo(0, y));
+      restoredRef.current = true;
+    }
+  });
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
   const toggleGroup = useCallback((key: string) => {

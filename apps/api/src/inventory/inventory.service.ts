@@ -119,8 +119,32 @@ export class InventoryService {
     });
     const saved = await this.inventoryRepository.save(updated);
 
-    // Trigger restock notification based on composition group total
-    if (saved.restockAlert) {
+    // When restockAlert changes, propagate to all items in the same composition group
+    if (updateInventoryDto.restockAlert !== undefined) {
+      const all = await this.inventoryRepository.find();
+      const key = this.compositionKey(saved);
+      if (!key.startsWith('_solo_')) {
+        const siblings = all.filter(
+          (i) => i.id !== saved.id && this.compositionKey(i) === key,
+        );
+        if (siblings.length > 0) {
+          for (const sibling of siblings) {
+            sibling.restockAlert = saved.restockAlert;
+          }
+          await this.inventoryRepository.save(siblings);
+        }
+      }
+
+      // Trigger restock notification based on composition group total
+      if (saved.restockAlert) {
+        const freshAll = await this.inventoryRepository.find();
+        const groupTotals = this.groupQuantities(freshAll);
+        if (this.needsRestock(saved, groupTotals)) {
+          await this.notificationsService.triggerRestockAlert(saved);
+        }
+      }
+    } else if (saved.restockAlert) {
+      // Quantity or other field changed — check restock
       const all = await this.inventoryRepository.find();
       const groupTotals = this.groupQuantities(all);
       if (this.needsRestock(saved, groupTotals)) {
