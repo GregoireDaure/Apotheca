@@ -30,8 +30,9 @@ export function AuthGuard({ children }: Readonly<{ children: React.ReactNode }>)
     if (!initialized) return;
 
     const isLoginPage = location.pathname === "/login";
+    const isInvitePage = location.pathname.startsWith("/invite/");
 
-    if (!authenticated && !isLoginPage) {
+    if (!authenticated && !isLoginPage && !isInvitePage) {
       navigate("/login", { replace: true });
     } else if (authenticated && isLoginPage) {
       navigate("/", { replace: true });

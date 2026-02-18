@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import { randomBytes } from 'crypto';
 import { Passkey } from './entities/passkey.entity';
 
 // SimpleWebAuthn v13+ is ESM-only; we use dynamic imports
@@ -22,6 +23,9 @@ export class AuthService {
 
   /** In-memory challenge store (keyed by a session token) */
   private readonly challenges = new Map<string, { challenge: string; expiresAt: number }>();
+
+  /** In-memory invite code store */
+  private readonly invites = new Map<string, { expiresAt: number; used: boolean }>();
 
   constructor(
     @InjectRepository(Passkey)
@@ -245,6 +249,53 @@ export class AuthService {
       createdAt: p.createdAt,
       lastUsedAt: p.lastUsedAt,
     }));
+  }
+
+  // ---------- Invite ----------
+
+  /**
+   * Generate a short-lived invite code that allows a new household
+   * member to register their own passkey without being authenticated.
+   */
+  createInvite(): { code: string; expiresAt: number } {
+    // Clean up expired invites
+    const now = Date.now();
+    for (const [code, invite] of this.invites) {
+      if (invite.expiresAt < now) this.invites.delete(code);
+    }
+
+    const code = randomBytes(4).toString('hex'); // 8 hex chars
+    const expiresAt = now + 10 * 60 * 1000; // 10 minutes
+    this.invites.set(code, { expiresAt, used: false });
+
+    this.logger.log(`Invite created: ${code} (expires in 10 min)`);
+    return { code, expiresAt };
+  }
+
+  /**
+   * Validate an invite code without consuming it.
+   */
+  validateInvite(code: string): { valid: boolean; remainingSeconds: number } {
+    const invite = this.invites.get(code);
+    if (!invite || invite.used || invite.expiresAt < Date.now()) {
+      return { valid: false, remainingSeconds: 0 };
+    }
+    return {
+      valid: true,
+      remainingSeconds: Math.ceil((invite.expiresAt - Date.now()) / 1000),
+    };
+  }
+
+  /**
+   * Consume an invite code (mark as used). Returns false if invalid.
+   */
+  consumeInvite(code: string): boolean {
+    const invite = this.invites.get(code);
+    if (!invite || invite.used || invite.expiresAt < Date.now()) {
+      return false;
+    }
+    invite.used = true;
+    return true;
   }
 
   // ---------- Helpers ----------

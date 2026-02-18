@@ -5,7 +5,7 @@ import { startRegistration } from "@simplewebauthn/browser";
 import { Separator } from "@/components/ui/separator";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/stores/auth.store";
-import { Fingerprint, Plus, LogOut, Smartphone, Bell, BellOff } from "lucide-react";
+import { Fingerprint, Plus, LogOut, Smartphone, Bell, BellOff, UserPlus, Copy, Check } from "lucide-react";
 
 interface Passkey {
   id: string;
@@ -22,6 +22,11 @@ export default function Settings() {
   const [addLabel, setAddLabel] = useState("");
   const [showAddForm, setShowAddForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // --- Invite state ---
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [inviteCopied, setInviteCopied] = useState(false);
+  const [inviteLoading, setInviteLoading] = useState(false);
 
   // --- Push notification state ---
   const [pushSupported, setPushSupported] = useState(false);
@@ -84,6 +89,31 @@ export default function Settings() {
       setPushLoading(false);
     }
   }, [pushEnabled]);
+
+  const generateInvite = useCallback(async () => {
+    setInviteLoading(true);
+    try {
+      const { data } = await api.post("/auth/invite");
+      const link = `${window.location.origin}/invite/${data.code}`;
+      setInviteLink(link);
+      setInviteCopied(false);
+    } catch {
+      setError("Failed to generate invite link");
+    } finally {
+      setInviteLoading(false);
+    }
+  }, []);
+
+  const copyInviteLink = useCallback(async () => {
+    if (!inviteLink) return;
+    try {
+      await navigator.clipboard.writeText(inviteLink);
+      setInviteCopied(true);
+      setTimeout(() => setInviteCopied(false), 2000);
+    } catch {
+      // Fallback for browsers without clipboard API
+    }
+  }, [inviteLink]);
 
   // --- Passkeys ---
   const { data: passkeys = [], isLoading } = useQuery<Passkey[]>({
@@ -213,6 +243,62 @@ export default function Settings() {
               </div>
             ))}
           </div>
+        )}
+      </div>
+
+      {/* Invite member */}
+      <div className="rounded-xl border bg-card shadow-card">
+        <div className="flex items-center justify-between px-5 py-4">
+          <div>
+            <p className="text-body font-medium text-foreground flex items-center gap-2">
+              <UserPlus className="h-4 w-4" /> Invite member
+            </p>
+            <p className="text-body-small text-muted-foreground">
+              Generate a link so someone can register their own passkey
+            </p>
+          </div>
+          {!inviteLink && (
+            <button
+              onClick={generateInvite}
+              disabled={inviteLoading}
+              className="flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground active:scale-95 transition-transform disabled:opacity-50"
+            >
+              {inviteLoading ? "…" : "Generate"}
+            </button>
+          )}
+        </div>
+
+        {inviteLink && (
+          <>
+            <Separator />
+            <div className="px-5 py-4 space-y-3">
+              <p className="text-xs text-muted-foreground">
+                Share this link — it expires in 10 minutes:
+              </p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 rounded-lg border bg-muted px-3 py-2 text-xs break-all select-all">
+                  {inviteLink}
+                </code>
+                <button
+                  onClick={copyInviteLink}
+                  className="shrink-0 rounded-lg border p-2 active:scale-95 transition-transform"
+                  aria-label="Copy link"
+                >
+                  {inviteCopied ? (
+                    <Check className="h-4 w-4 text-status-green" />
+                  ) : (
+                    <Copy className="h-4 w-4 text-muted-foreground" />
+                  )}
+                </button>
+              </div>
+              <button
+                onClick={() => setInviteLink(null)}
+                className="text-xs text-muted-foreground underline"
+              >
+                Dismiss
+              </button>
+            </div>
+          </>
         )}
       </div>
 

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Query, Res, Req } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, Param, Res, Req, BadRequestException } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { Response, Request } from 'express';
 import { AuthService } from './auth.service';
@@ -89,6 +89,61 @@ export class AuthController {
     const result = await this.authService.verifyAuthentication(
       body.challengeToken,
       body.credential,
+    );
+
+    if (result.jwt) {
+      res.cookie(COOKIE_NAME, result.jwt, COOKIE_OPTIONS);
+    }
+
+    return { verified: result.verified };
+  }
+
+  // ---------- Invite ----------
+
+  @Post('invite')
+  @ApiOperation({ summary: 'Generate a 10-minute invite code for a new household member' })
+  createInvite() {
+    return this.authService.createInvite();
+  }
+
+  @Public()
+  @Get('invite/:code/validate')
+  @ApiOperation({ summary: 'Check if an invite code is still valid' })
+  validateInvite(@Param('code') code: string) {
+    return this.authService.validateInvite(code);
+  }
+
+  @Public()
+  @Get('invite/:code/register/options')
+  @ApiOperation({ summary: 'Generate registration options using an invite code' })
+  async inviteRegistrationOptions(
+    @Param('code') code: string,
+    @Query('label') label?: string,
+  ) {
+    const { valid } = this.authService.validateInvite(code);
+    if (!valid) {
+      throw new BadRequestException('Invite code is invalid or expired');
+    }
+    return this.authService.generateRegistrationOptions(label);
+  }
+
+  @Public()
+  @Post('invite/:code/register/verify')
+  @ApiOperation({ summary: 'Verify registration and consume invite code' })
+  async inviteVerifyRegistration(
+    @Param('code') code: string,
+    @Body() body: { challengeToken: string; credential: unknown; label?: string },
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const consumed = this.authService.consumeInvite(code);
+    if (!consumed) {
+      throw new BadRequestException('Invite code is invalid or expired');
+    }
+
+    const result = await this.authService.verifyRegistration(
+      body.challengeToken,
+      body.credential,
+      body.label,
     );
 
     if (result.jwt) {

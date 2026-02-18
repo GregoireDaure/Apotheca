@@ -14,6 +14,7 @@ const MedicineDetail = lazy(() => import('./pages/MedicineDetail'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Login = lazy(() => import('./pages/Login'));
 const Notifications = lazy(() => import('./pages/Notifications'));
+const Invite = lazy(() => import('./pages/Invite'));
 
 function PageFallback() {
   return (
@@ -51,6 +52,7 @@ function App() {
         <AuthGuard>
           <Routes>
             <Route path="/login" element={<Suspense fallback={<PageFallback />}><Login /></Suspense>} />
+            <Route path="/invite/:code" element={<Suspense fallback={<PageFallback />}><Invite /></Suspense>} />
             <Route path="/" element={<Shell />}>
               <Route index element={<Dashboard />} />
               <Route path="scan" element={<Suspense fallback={<PageFallback />}><Scan /></Suspense>} />
