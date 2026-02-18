@@ -6,7 +6,7 @@ import {
 import { DecodeHintType } from "@zxing/library";
 import { parseScanResult, parseGs1DataMatrix, type ScanResult } from "@/lib/gs1-parser";
 import { Button } from "@/components/ui/button";
-import { X, Zap, ZapOff } from "lucide-react";
+import { X, Zap, ZapOff, SwitchCamera } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const DEBUG = import.meta.env.VITE_DEBUG === "1";
@@ -28,6 +28,7 @@ export function CameraScanner({
   const [error, setError] = useState<string | null>(null);
   const [torchOn, setTorchOn] = useState(false);
   const [hasTorch, setHasTorch] = useState(false);
+  const [facingMode, setFacingMode] = useState<"environment" | "user">("environment");
   const lastScanRef = useRef<string>("");
   const lastScanTimeRef = useRef<number>(0);
   const [debugLog, setDebugLog] = useState<string[]>([]);
@@ -101,7 +102,7 @@ export function CameraScanner({
         addDebug("3. Requesting getUserMedia...");
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
-            facingMode: { ideal: "environment" },
+            facingMode: { ideal: facingMode },
             width: { ideal: 1280 },
             height: { ideal: 720 },
           },
@@ -215,7 +216,7 @@ export function CameraScanner({
       setHasTorch(false);
       setTorchOn(false);
     };
-  }, [active, handleScanSuccess, addDebug]);
+  }, [active, facingMode, handleScanSuccess, addDebug]);
 
   const toggleTorch = async () => {
     if (!streamRef.current) return;
@@ -274,28 +275,40 @@ export function CameraScanner({
             Scan Barcode
           </span>
 
-          {hasTorch ? (
+          <div className="flex items-center gap-2">
             <Button
               variant="ghost"
               size="icon"
-              className={cn(
-                "h-10 w-10 rounded-full hover:text-white",
-                torchOn
-                  ? "bg-yellow-500/80 text-white hover:bg-yellow-500/60"
-                  : "bg-black/40 text-white hover:bg-black/60"
-              )}
-              onClick={toggleTorch}
-              aria-label={torchOn ? "Turn off flashlight" : "Turn on flashlight"}
+              className="h-10 w-10 rounded-full bg-black/40 text-white hover:bg-black/60 hover:text-white"
+              onClick={() => setFacingMode((m) => m === "environment" ? "user" : "environment")}
+              aria-label="Switch camera"
             >
-              {torchOn ? (
-                <Zap className="h-5 w-5" />
-              ) : (
-                <ZapOff className="h-5 w-5" />
-              )}
+              <SwitchCamera className="h-5 w-5" />
             </Button>
-          ) : (
-            <div className="w-10" /> // spacer
-          )}
+
+            {hasTorch ? (
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn(
+                  "h-10 w-10 rounded-full hover:text-white",
+                  torchOn
+                    ? "bg-yellow-500/80 text-white hover:bg-yellow-500/60"
+                    : "bg-black/40 text-white hover:bg-black/60"
+                )}
+                onClick={toggleTorch}
+                aria-label={torchOn ? "Turn off flashlight" : "Turn on flashlight"}
+              >
+                {torchOn ? (
+                  <Zap className="h-5 w-5" />
+                ) : (
+                  <ZapOff className="h-5 w-5" />
+                )}
+              </Button>
+            ) : (
+              <div className="w-10" />
+            )}
+          </div>
         </div>
 
         {/* Center viewfinder guide — responsive sizing */}
